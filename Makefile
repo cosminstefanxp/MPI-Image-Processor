@@ -8,6 +8,7 @@ NP_ARG= -np
 SOURCES = img_process.c
 EXECUTABLE = img_process
 OBJECTS = $(SOURCES:.c=.o)
+HEADERS = $(SOURCES:.c=.h)
 
 all: $(EXECUTABLE)
 
