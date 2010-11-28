@@ -1,5 +1,5 @@
 CC    = mpicc
-CFLAGS = -c -Wall
+CFLAGS = -c -Wall -g
 MAKE  = make
 LIBS  = -lm -lmpi
 MPIRUN= mpirun
@@ -21,7 +21,10 @@ $(EXECUTABLE): $(OBJECTS)
 clean:
 	rm -f *.o $(EXECUTABLE)
 	
-run:
-	${MPIRUN} ${NP_ARG} 4 ./${EXECUTABLE} 100
+run: $(EXECUTABLE)
+	${MPIRUN} ${NP_ARG} 5 ./${EXECUTABLE} contrast bec10.pgm
+
+run2: $(EXECUTABLE)
+	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} contrast test.pgm
 
 sources: @echo ${SOURCES}

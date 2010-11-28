@@ -15,10 +15,13 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <mpi/mpi.h>
     
 
 
 #define U8 unsigned char
+#define MASTER 0
+
 
 
 
