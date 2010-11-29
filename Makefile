@@ -21,10 +21,10 @@ $(EXECUTABLE): $(OBJECTS)
 clean:
 	rm -f *.o $(EXECUTABLE)
 	
-run: $(EXECUTABLE)
-	${MPIRUN} ${NP_ARG} 5 ./${EXECUTABLE} contrast bec10.pgm
+contrast_big: $(EXECUTABLE)
+	${MPIRUN} ${NP_ARG} 4 ./${EXECUTABLE} contrast bec10.pgm
 
-run2: $(EXECUTABLE)
-	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} contrast test.pgm
+contrast: $(EXECUTABLE)
+	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} contrast test.pgm 2 12 out.pgm
 
 sources: @echo ${SOURCES}

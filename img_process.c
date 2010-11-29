@@ -15,6 +15,9 @@ int MAX_COLOR;
 U8 *fullImage;
 U8 **imageStrip;
 
+int rank,numberProcesses;
+int stripSize,stripStart,stripEnd;
+
 
 /* Citeste datele de intrare.*/
 void readData(char* inputFile)
@@ -98,6 +101,29 @@ void readData(char* inputFile)
         }
 }
 
+
+//Functia ce realizeaza ajustarea contrastului imaginii:
+//If = (b-a) * (Ii -min) / (max-min) + a
+void contrast(int a,int b)
+{
+    int i,j;
+    int min=MAX_COLOR;
+    int max=0;
+
+    printf("[Proces 0] Incepem ajustarea contrastului imaginii.\n");
+    //Calculare min/max pe fasie
+    for(i=1;i<=stripSize;i++)
+        for(j=1;j<=WIDTH;j++)
+        {
+            if(imageStrip[i][j]>max)
+                max=imageStrip[i][j];
+            if(imageStrip[i][j]<min)
+                min=imageStrip[i][j];
+        }
+    printf("[Proces 0]\t Min fasie: %d, Max fasie: %d\n",min,max);
+            
+}
+
 /*
  * 
  */
@@ -110,12 +136,40 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    /*****************VERIFICARE PARAMETRII*****************************/
+    if(strcasecmp(argv[1],"contrast")==0)
+    {
+        if(argc!=6)
+        {
+            fprintf (stderr,"\nNumar incorect de parametrii. Utilizare:\n%s contrast input_file a b output_file\n",argv[0]);
+            return EXIT_FAILURE;
+        }
+    }
+
+    if(strcasecmp(argv[1],"filter")==0)
+    {
+        if(argc!=5)
+        {
+            fprintf (stderr,"\nNumar incorect de parametrii. Utilizare:\n%s filter input_file smooth/blur/sharpen/mean_removal/emboss output_file\n",argv[0]);
+            return EXIT_FAILURE;
+        }
+    }
+
+    if(strcasecmp(argv[1],"entropy")==0)
+    {
+        if(argc!=7)
+        {
+            fprintf (stderr,"\nNumar incorect de parametrii. Utilizare:\n%s entropy input_file a b c output_file\n",argv[0]);
+            return EXIT_FAILURE;
+        }
+    }
+
+
+    /*********************** MPI STARTING FROM HERE ************************/
 
     MPI_Status status;
     MPI_Request *requests;
     MPI_Status *statuses;
-    int rank,numberProcesses;
-    int stripSize,stripStart,stripEnd;
     int rc;
     int i,j;
     int bufferInt[20];
@@ -148,9 +202,8 @@ int main(int argc, char** argv)
             printf("%3d ",fullImage[i*WIDTH+j]);
     }
 
+    /************************ COMUNICATIE INITIALA ****************************/
     //transmitere dimensiuni imagine la procese
-    //if(rank==MASTER)
-
     bufferInt[0]=WIDTH;
     bufferInt[1]=HEIGHT;
     MPI_Bcast (&bufferInt,2,MPI_INT,MASTER,MPI_COMM_WORLD);
@@ -245,76 +298,15 @@ int main(int argc, char** argv)
         for(j=1;j<=WIDTH;j++)
             printf("%3d ",imageStrip[i][j]);
 
-    /*
-    // initializarea matricilor locale
-    for (k=0; k<size; k++) {
-	if (rank == k) {
-	    limage = (int**)malloc((stripSize+2) * sizeof(int*));
-	    if (limage == NULL) {
-		printf("Process %d could not allocate any more memory\n", rank);
-		MPI_Abort(MPI_COMM_WORLD, 7777);
-	    }
-	    llabel = (int**)malloc((stripSize+2) * sizeof(int*));
-	    if (llabel == NULL) {
-		printf("Process %d could not allocate any more memory\n", rank);
-		MPI_Abort(MPI_COMM_WORLD, 7777);
-	    }
-	    for (i=0; i<stripSize+2; i++) {
-    		limage[i] = (int*)malloc(N * sizeof(int));
-		if (limage[i] == NULL) {
-		    printf("Process %d could not allocate any more memory\n", rank);
-		    MPI_Abort(MPI_COMM_WORLD, 7777);
-		}
-		llabel[i] = (int*)malloc(N * sizeof(int));
-		if (llabel[i] == NULL){
-		    printf("Process %d could not allocate any more memory\n", rank);
-		    MPI_Abort(MPI_COMM_WORLD, 7777);
-		}
-	    }
-	}
+    /********************* END COMUNICATIE INITIALA ***************************/
+   
+    if(strcasecmp(argv[1],"contrast")==0)
+    {
+        int a,b;
+        sscanf(argv[3],"%d",&a);
+        sscanf(argv[4],"%d",&b);
+        contrast(a,b);
     }
-    
-    // procesul 0 este coordonator - se ocupa de initializare
-    if (rank == 0) {    
-	for (i=0; i<N; i++)
-	    for (j=0; j<N; j++) {
-		image[i][j] = random()%2;
-		label[i][j] = i * N + j;
-	    }
-	
-	printf("\nMatricea initiala...\n");
-	print(label, image);
-	    
-	// initialize local image and local label
-	for (i=0; i<stripSize; i++)
-	    for (j=0; j<N; j++) {
-		limage[i+1][j] = image[i][j];
-		llabel[i+1][j] = label[i][j];	
-	    }
-	    
-	// initialize the rest of the local labels and local images
-	n = stripSize;
-	for (k=1; k<size; k++) {
-	    MPI_Recv(&tmp, 1, MPI_INT, k, 1, MPI_COMM_WORLD, &status); // receive stripSize from k
-	    for (i=0; i<tmp; i++) {
-	        MPI_Send(image[n+i], N, MPI_INT, k, 1, MPI_COMM_WORLD);
-		MPI_Send(label[n+i], N, MPI_INT, k, 1, MPI_COMM_WORLD);
-	    }
-	    n += tmp;
-	}
-    } else {
-	MPI_Send(&stripSize, 1, MPI_INT, 0, 1, MPI_COMM_WORLD);
-	for (i=0; i<stripSize; i++) {
-	    MPI_Recv(limage[i+1], N, MPI_INT, 0, 1, MPI_COMM_WORLD, &status);
-	    MPI_Recv(llabel[i+1], N, MPI_INT, 0, 1, MPI_COMM_WORLD, &status);
-	}
-    }
-*/
-
-
-
-
-
 
 
     MPI_Finalize();
