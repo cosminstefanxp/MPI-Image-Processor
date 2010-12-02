@@ -8,7 +8,9 @@ NP_ARG= -np
 SOURCES = img_process.c
 EXECUTABLE = img_process
 OBJECTS = $(SOURCES:.c=.o)
-HEADERS = $(SOURCES:.c=.h)
+HEADERS = $(SOURCES:.c=.h) filters.h
+
+filtru = identity
 
 all: $(EXECUTABLE)
 
@@ -29,5 +31,11 @@ contrast: $(EXECUTABLE)
 
 contrast_back: contrast
 	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} contrast out.pgm 0 15 out_final.pgm
+
+filter: $(EXECUTABLE)
+	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} filter test.pgm $(filtru) out.pgm
+
+filter_big: $(EXECUTABLE)
+	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} filter bec10.pgm $(filtru) out.pgm
 
 sources: @echo ${SOURCES}

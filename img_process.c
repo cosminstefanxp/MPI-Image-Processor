@@ -163,6 +163,101 @@ void contrast(int a,int b)
     printf("[Proces %d]\tAjustarea contrastului terminata.\n",rank);
 }
 
+void filters(char* filterName)
+{
+    int filterType;
+    int *filterMatrix;
+    int i,j;
+
+    //Setting the filter type
+    if(strcasecmp(filterName,"identity")==0)
+    {
+        filterType=F_IDENTITY_C;
+        filterMatrix=F_IDENTITY;
+    } else
+    if(strcasecmp(filterName,"smooth")==0)
+    {
+        filterType=F_SMOOTH_C;
+        filterMatrix=F_SMOOTH;
+    } else
+    if(strcasecmp(filterName,"blur")==0)
+    {
+        filterType=F_BLUR_C;
+        filterMatrix=F_BLUR;
+    } else
+    if(strcasecmp(filterName,"sharpen")==0)
+    {
+        filterType=F_SHARPEN_C;
+        filterMatrix=F_SHARPEN;
+    }
+    if(strcasecmp(filterName,"mean_removal")==0)
+    {
+        filterType=F_MEAN_REMOVE_C;
+        filterMatrix=F_MEAN_REMOVE;
+    }
+    if(strcasecmp(filterName,"emboss")==0)
+    {
+        filterType=F_EMBOSS_C;
+        filterMatrix=F_EMBOSS;
+    }
+
+    printf("[Proces %d] Setat mod filtru %s. Se incepe comunicarea pentru obtinerea infomatiilor necesare.\n",rank,filterName);
+
+    //Obtaining the extra-required lines from the neighbouring processes - MPI Communication
+    MPI_Status status;
+    //Primim de sus - daca nu e primul
+    if(rank!=0)
+	MPI_Recv(imageStrip[0]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank-1,1,MPI_COMM_WORLD,&status);
+
+    //Trimitem in jos - daca nu e ultimul
+    if(rank!=numberProcesses-1)
+	MPI_Send(imageStrip[stripSize]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank+1,1,MPI_COMM_WORLD);
+
+    //primim de jos - daca nu e ultimul
+    if(rank!=numberProcesses-1)
+	MPI_Recv(imageStrip[stripSize+1]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank+1,1,MPI_COMM_WORLD,&status);
+
+    //Trimitem in sus - daca nu e primul
+    if(rank!=0)
+	MPI_Send(imageStrip[1]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank-1,1,MPI_COMM_WORLD);
+
+    printf("[Proces %d] \tS-au primit datele auxiliare.\n",rank); // Fasia cu extensie este:\n\t",rank);
+/*
+    for(i=0;i<=stripSize+1;i++,printf("\n\t"))
+	for(j=0;j<=WIDTH+1;j++)
+	    printf("%3d ",imageStrip[i][j]);
+*/
+
+    for(i=0;i<9;i++)
+	printf("%d ",filterMatrix[i]);
+
+    //Aplicam filtrul
+    int sum,k;
+    for(i=1;i<=stripSize;i++)
+	for(j=1;j<=WIDTH;j++)
+	{
+	    sum=0;
+	    //Linia anterioara
+	    for(k=-1;k<=1;k++)
+		sum+=filterMatrix[k+1]*imageStrip[i-1][j+k];
+	    
+	    //Linia curenta
+	    for(k=-1;k<=1;k++)
+		sum+=filterMatrix[k+1+3]*imageStrip[i][j+k];
+
+	    //Linia urmatoare
+	    for(k=-1;k<=1;k++)
+		sum+=filterMatrix[k+1+6]*imageStrip[i+1][j+k];
+
+	    sum=sum/F_FACTORS[filterType]+F_OFFSETS[filterType];
+	    if(sum>MAX_COLOR)
+		sum=MAX_COLOR;
+	    if(sum<0)
+		sum=0;
+	    imageStrip[i][j]=sum;
+	}
+}
+
 /*
  * 
  */
@@ -357,6 +452,12 @@ int main(int argc, char** argv)
         sscanf(argv[3],"%d",&a);
         sscanf(argv[4],"%d",&b);
         contrast(a,b);
+    }
+
+    //Aplicare filtre
+    if(strcasecmp(argv[1],"filter")==0)
+    {
+	filters(argv[3]);
     }
 
 
