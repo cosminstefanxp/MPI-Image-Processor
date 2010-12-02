@@ -38,4 +38,10 @@ filter: $(EXECUTABLE)
 filter_big: $(EXECUTABLE)
 	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} filter bec10.pgm $(filtru) out.pgm
 
+entropy: $(EXECUTABLE)
+	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} entropy test.pgm 1 1 1 out_residual
+
+entropy_big: $(EXECUTABLE)
+	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} entropy picture.pgm 1 1 1 out_residual
+
 sources: @echo ${SOURCES}

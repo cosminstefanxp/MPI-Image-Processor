@@ -15,6 +15,8 @@ int MAX_COLOR;
 
 U8 *fullImage;
 U8 **imageStrip;
+short **imageResidual;
+short *fullImageResidual;
 
 int rank,numberProcesses;
 int stripSize,stripStart,stripEnd;
@@ -128,6 +130,31 @@ void writeData(char* outputFile)
     printf("[Proces %d]\tScriere fisier de iesire terminata.\n",rank);
 }
 
+/* Scrie fisierul de iesire al imaginii reziduale, folosind datele din fullImageResidual */
+void writeDataResidual(char* outputFile)
+{
+    FILE* fout;
+    int i,j;
+
+    printf("[Proces %d] Scriere fisier de iesire.\n",rank);
+
+    if((fout=fopen(outputFile,"w"))==NULL)
+    {
+        perror("Eroare la deschiderea fisierului de iesire");
+        exit(1);
+    }
+
+    //Scriere header
+    fprintf(fout,"%d %d\n",WIDTH,HEIGHT);
+    //Scriere date
+    for(i=0;i<HEIGHT;i++)
+        for(j=0;j<WIDTH;j++)
+            fprintf(fout,"%d\n",fullImageResidual[i*WIDTH+j]);
+    fclose(fout);
+
+    printf("[Proces %d]\tScriere fisier de iesire terminata.\n",rank);
+}
+
 
 //Functia ce realizeaza ajustarea contrastului imaginii:
 //If = (b-a) * (Ii -min) / (max-min) + a
@@ -163,6 +190,7 @@ void contrast(int a,int b)
     printf("[Proces %d]\tAjustarea contrastului terminata.\n",rank);
 }
 
+/* Aplicarea unui filtru imaginii. */
 void filters(char* filterName)
 {
     int filterType;
@@ -222,14 +250,6 @@ void filters(char* filterName)
 	MPI_Send(imageStrip[1]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank-1,1,MPI_COMM_WORLD);
 
     printf("[Proces %d] \tS-au primit datele auxiliare.\n",rank); // Fasia cu extensie este:\n\t",rank);
-/*
-    for(i=0;i<=stripSize+1;i++,printf("\n\t"))
-	for(j=0;j<=WIDTH+1;j++)
-	    printf("%3d ",imageStrip[i][j]);
-*/
-
-    for(i=0;i<9;i++)
-	printf("%d ",filterMatrix[i]);
 
     //Aplicam filtrul
     int sum,k;
@@ -256,6 +276,123 @@ void filters(char* filterName)
 		sum=0;
 	    imageStrip[i][j]=sum;
 	}
+    printf("[Proces %d] \tFiltrul a fost aplicat cu succes.\n",rank);
+
+
+}
+
+
+void trimiteImageResidual()
+{
+    MPI_Request *requests;
+    MPI_Status *statuses;
+
+    if(rank==MASTER)
+    {
+	fullImageResidual=(short*)malloc(WIDTH*HEIGHT*sizeof(U8*));
+	requests=(MPI_Request*)malloc(sizeof(MPI_Request)*numberProcesses);
+        statuses=(MPI_Status*)malloc(sizeof(MPI_Status)*numberProcesses);
+    }
+    
+    int i,j,pozCerere;
+    //Colectare informatii
+    if(rank != MASTER )
+    {
+        printf("[Proces %d] \tTrimitem fasia din imaginea residuala spre procesul master.\n",rank);
+        //Copiem datele intr-un buffer, pentru a fi transmise simultan
+        short* buffer=(short*) malloc (stripSize*WIDTH*sizeof(short));
+        for(i=0;i<stripSize;i++)
+            for(j=0;j<WIDTH;j++)
+                buffer[i*WIDTH + j]=imageResidual[i][j];
+        //Trimitem datele
+        MPI_Send(buffer,stripSize*WIDTH,MPI_SHORT,MASTER,rank,MPI_COMM_WORLD);
+        //eliberam memoria
+        free(buffer);
+    }
+    //MASTER PROCESS
+    else
+    {
+        printf("[MASTER] \tPrimim fasiile dim imaginea reziduala de la restul proceselor.\n");
+        int sendStripeSize=HEIGHT/ numberProcesses;
+        int initialStripSize=sendStripeSize;
+        pozCerere=0;
+        //Copiem datele de la fiecare proces in locatia corespunzatoare din fullImage
+        for(i=0;i<numberProcesses;i++)
+            if(i!=MASTER)
+            {
+                printf("[MASTER] \tPrimim datele de la procesul %d.\n",i);
+                if(i==numberProcesses-1)
+                    sendStripeSize = HEIGHT - sendStripeSize * (numberProcesses-1);
+                MPI_Irecv (fullImageResidual + i*initialStripSize*WIDTH*sizeof(short),sendStripeSize*WIDTH,MPI_SHORT,i,i,MPI_COMM_WORLD,&requests[pozCerere++]);
+            }
+        //Punem si datele procesului MASTER in imageStrip
+        for(i=0;i<stripSize;i++)
+            for(j=0;j<WIDTH;j++)
+            {
+                fullImageResidual[rank*WIDTH + i*WIDTH + i]=imageResidual[i][j];
+            }
+
+        printf("[MASTER]\tAsteptam primirea datelor.\n");
+        MPI_Waitall(numberProcesses-1,requests,statuses);
+    }
+    
+}
+
+
+/* Realizeaza taskul 3 - calculul entropiei */
+void entropy(float a, float b, float c)
+{
+    //Obtaining the extra-required lines from the neighbouring processes - MPI Communication
+    MPI_Status status;
+    //Primim de sus - daca nu e primul
+    if(rank!=0)
+	MPI_Recv(imageStrip[0]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank-1,1,MPI_COMM_WORLD,&status);
+
+    //Trimitem in jos - daca nu e ultimul
+    if(rank!=numberProcesses-1)
+	MPI_Send(imageStrip[stripSize]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank+1,1,MPI_COMM_WORLD);
+
+    //primim de jos - daca nu e ultimul
+    if(rank!=numberProcesses-1)
+	MPI_Recv(imageStrip[stripSize+1]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank+1,1,MPI_COMM_WORLD,&status);
+
+    //Trimitem in sus - daca nu e primul
+    if(rank!=0)
+	MPI_Send(imageStrip[1]+sizeof(U8),WIDTH,MPI_UNSIGNED_CHAR,rank-1,1,MPI_COMM_WORLD);
+
+    printf("[Proces %d] \tS-au primit datele auxiliare.\n",rank);
+
+    //Calcularea imaginii reziduale
+    int i,j;
+
+    //Alocarea spatiului pentru matricea reziduala, cu verificare de alocare
+    /* Matricea are stripSize linii si WIDTH coloane => O mica decalare fata de imageStrip. */
+    imageResidual=(short**)malloc(stripSize*sizeof(short*));
+    if (imageResidual == NULL) {
+        fprintf(stderr,"[ERROR] Process %d could not allocate any more memory for residual matrix.\n", rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+    for(i=0;i<stripSize;i++)
+    {
+        imageResidual[i]=(short*)calloc((WIDTH),sizeof(short));
+        if (imageResidual[i] == NULL) {
+            fprintf(stderr,"[ERROR] Process %d could not allocate any more memory for residual matrix row %d.\n", rank,i);
+            MPI_Abort(MPI_COMM_WORLD, 2);
+        }
+    }
+
+    /***** Calcul PREDICTOR + IMAGINE REZIDUALA ****/
+    for(i=1;i<=stripSize;i++)
+	for(j=1;j<=WIDTH;j++)
+	{
+	    //predictor
+	    imageResidual[i-1][j-1]=ceil(a*imageStrip[i-1][j] + b*imageStrip[i-1][j-1] + c*imageStrip[i][j-1]);
+	    imageResidual[i-1][j-1]=imageStrip[i][j]-imageResidual[i-1][j-1];
+	}
+
+    printf("[Proces %d] \tS-a terminat calculul imaginii reziduale.\n",rank);
+    trimiteImageResidual();
+
 }
 
 /*
@@ -458,6 +595,21 @@ int main(int argc, char** argv)
     if(strcasecmp(argv[1],"filter")==0)
     {
 	filters(argv[3]);
+    }
+
+    //Aplicare entropy
+    if(strcasecmp(argv[1],"entropy")==0)
+    {
+	float a,b,c;
+	sscanf(argv[3],"%f",&a);
+        sscanf(argv[4],"%f",&b);
+	sscanf(argv[5],"%f",&c);
+	entropy(a,b,c);
+	if(rank==MASTER)
+	    writeDataResidual(outputFileName);
+
+	MPI_Finalize();
+	return (EXIT_SUCCESS);
     }
 
 
