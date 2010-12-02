@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <values.h>
 #include "img_process.h"
+#include "filters.h"
 
 int WIDTH;
 int HEIGHT;
