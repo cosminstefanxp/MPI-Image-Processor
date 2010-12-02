@@ -22,9 +22,12 @@ clean:
 	rm -f *.o $(EXECUTABLE)
 	
 contrast_big: $(EXECUTABLE)
-	${MPIRUN} ${NP_ARG} 4 ./${EXECUTABLE} contrast bec10.pgm
+	${MPIRUN} ${NP_ARG} 4 ./${EXECUTABLE} contrast bec10.pgm 70 180 out_bec10.pgm
 
 contrast: $(EXECUTABLE)
-	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} contrast test.pgm 2 12 out.pgm
+	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} contrast test.pgm 3 11 out.pgm
+
+contrast_back: contrast
+	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} contrast out.pgm 0 15 out_final.pgm
 
 sources: @echo ${SOURCES}

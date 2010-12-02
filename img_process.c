@@ -99,6 +99,32 @@ void readData(char* inputFile)
             fscanf(fin,"%d",&temp);
             fullImage[i*WIDTH+j]=temp;
         }
+    fclose(fin);
+}
+
+/* Scrie fisierul de iesire, folosind datele din fullImage */
+void writeData(char* outputFile)
+{
+    FILE* fout;
+    int i,j;
+
+    printf("[Proces %d] Scriere fisier de iesire.\n",rank);
+
+    if((fout=fopen(outputFile,"w"))==NULL)
+    {
+        perror("Eroare la deschiderea fisierului de iesire");
+        exit(1);
+    }
+
+    //Scriere header
+    fprintf(fout,"%s\n%d %d\n%d\n","P2",WIDTH,HEIGHT,MAX_COLOR);
+    //Scriere date
+    for(i=0;i<HEIGHT;i++,fprintf(fout,"\n"))
+        for(j=0;j<WIDTH;j++)
+            fprintf(fout,"%d ",fullImage[i*WIDTH+j]);
+    fclose(fout);
+
+    printf("[Proces %d]\tScriere fisier de iesire terminata.\n",rank);
 }
 
 
@@ -107,8 +133,9 @@ void readData(char* inputFile)
 void contrast(int a,int b)
 {
     int i,j;
-    int min=MAX_COLOR;
+    int min=MAX_COLOR+1;
     int max=0;
+    int minAbsolut,maxAbsolut;
 
     printf("[Proces 0] Incepem ajustarea contrastului imaginii.\n");
     //Calculare min/max pe fasie
@@ -120,8 +147,19 @@ void contrast(int a,int b)
             if(imageStrip[i][j]<min)
                 min=imageStrip[i][j];
         }
-    printf("[Proces 0]\t Min fasie: %d, Max fasie: %d\n",min,max);
-            
+    printf("[Proces %d]\tMin fasie: %d, Max fasie: %d\n",rank,min,max);
+    MPI_Allreduce(&min,&minAbsolut,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    MPI_Allreduce(&max,&maxAbsolut,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD);
+
+    if(rank==0)
+         printf("[Proces %d]\tMin absolut: %d, Max absolut: %d\n",rank,minAbsolut,maxAbsolut);
+
+    //Ajustarea contrastului
+    for(i=1;i<=stripSize;i++)
+        for(j=1;j<=WIDTH;j++)
+            imageStrip[i][j]= (b-a) * (imageStrip[i][j] -minAbsolut) / (maxAbsolut-minAbsolut) + a;
+
+    printf("[Proces %d]\tAjustarea contrastului terminata.\n",rank);
 }
 
 /*
@@ -129,6 +167,7 @@ void contrast(int a,int b)
  */
 int main(int argc, char** argv)
 {
+    char* outputFileName;
     //Initial parameters check
     if(argc<3)
     {
@@ -144,6 +183,7 @@ int main(int argc, char** argv)
             fprintf (stderr,"\nNumar incorect de parametrii. Utilizare:\n%s contrast input_file a b output_file\n",argv[0]);
             return EXIT_FAILURE;
         }
+        outputFileName=argv[5];
     }
 
     if(strcasecmp(argv[1],"filter")==0)
@@ -153,6 +193,7 @@ int main(int argc, char** argv)
             fprintf (stderr,"\nNumar incorect de parametrii. Utilizare:\n%s filter input_file smooth/blur/sharpen/mean_removal/emboss output_file\n",argv[0]);
             return EXIT_FAILURE;
         }
+        outputFileName=argv[4];
     }
 
     if(strcasecmp(argv[1],"entropy")==0)
@@ -162,6 +203,7 @@ int main(int argc, char** argv)
             fprintf (stderr,"\nNumar incorect de parametrii. Utilizare:\n%s entropy input_file a b c output_file\n",argv[0]);
             return EXIT_FAILURE;
         }
+        outputFileName=argv[6];
     }
 
 
@@ -194,6 +236,7 @@ int main(int argc, char** argv)
         statuses=(MPI_Status*)malloc(sizeof(MPI_Status)*numberProcesses);
     }
 
+/*
     if(rank==MASTER)
     {
     printf("[Proces %d] S-au citit datele:\n",rank);
@@ -201,18 +244,20 @@ int main(int argc, char** argv)
         for(j=0;j<WIDTH;j++)
             printf("%3d ",fullImage[i*WIDTH+j]);
     }
+*/
 
     /************************ COMUNICATIE INITIALA ****************************/
     //transmitere dimensiuni imagine la procese
     bufferInt[0]=WIDTH;
     bufferInt[1]=HEIGHT;
-    MPI_Bcast (&bufferInt,2,MPI_INT,MASTER,MPI_COMM_WORLD);
+    bufferInt[2]=MAX_COLOR;
+    MPI_Bcast (&bufferInt,3,MPI_INT,MASTER,MPI_COMM_WORLD);
 
     if(rank!=MASTER)
     {
         WIDTH=bufferInt[0];
         HEIGHT=bufferInt[1];
-        
+        MAX_COLOR=bufferInt[2];        
     }
 
     //Calculare dimensiune fasii
@@ -293,13 +338,18 @@ int main(int argc, char** argv)
             }
     }
 
+/*
     printf("[Proces %d] \tS-a primit fasia:\n",rank);
     for(i=1;i<=stripSize;i++,printf("\n"))
         for(j=1;j<=WIDTH;j++)
             printf("%3d ",imageStrip[i][j]);
+*/
 
     /********************* END COMUNICATIE INITIALA ***************************/
    
+    /**************************** PROCESARE ***********************************/
+
+    //Ajustare contrast
     if(strcasecmp(argv[1],"contrast")==0)
     {
         int a,b;
@@ -309,7 +359,56 @@ int main(int argc, char** argv)
     }
 
 
+    /************************** END PROCESARE *********************************/
+
+    //Colectare informatii
+    if(rank != MASTER )
+    {
+        printf("[Proces %d] Procesare completa. Trimitem fasia spre procesul master.\n",rank);
+        //Copiem datele intr-un buffer, pentru a fi transmise simultan
+        U8* buffer=(U8*) malloc (stripSize*WIDTH*sizeof(U8));
+        for(i=1;i<=stripSize;i++)
+            for(j=1;j<=WIDTH;j++)
+                buffer[(i-1)*WIDTH + (j-1)]=imageStrip[i][j];
+        //Trimitem datele
+        MPI_Send(buffer,stripSize*WIDTH,MPI_UNSIGNED_CHAR,MASTER,rank,MPI_COMM_WORLD);
+        //eliberam memoria
+        free(buffer);
+    }
+    //MASTER PROCESS
+    else
+    {
+        printf("[MASTER] Procesare completa. Primim fasiile de la restul proceselor.\n");
+        int sendStripeSize=HEIGHT/ numberProcesses;
+        int initialStripSize=sendStripeSize;
+        pozCerere=0;
+        //Copiem datele de la fiecare proces in locatia corespunzatoare din fullImage
+        for(i=0;i<numberProcesses;i++)
+            if(i!=MASTER)
+            {
+                printf("[MASTER] \tPrimim datele de la procesul %d.\n",i);
+                if(i==numberProcesses-1)
+                    sendStripeSize = HEIGHT - sendStripeSize * (numberProcesses-1);
+                MPI_Irecv (fullImage + i*initialStripSize*WIDTH,sendStripeSize*WIDTH,MPI_UNSIGNED_CHAR,i,i,MPI_COMM_WORLD,&requests[pozCerere++]);                
+            }
+        //Punem si datele procesului MASTER in imageStrip
+        for(i=1;i<=stripSize;i++)
+            for(j=1;j<=WIDTH;j++)
+            {
+                fullImage[rank*WIDTH + (i-1)*WIDTH + (j-1)]=imageStrip[i][j];
+            }
+
+        printf("[MASTER]\tAsteptam primirea datelor.\n");
+        MPI_Waitall(numberProcesses-1,requests,statuses);
+    }
+
     MPI_Finalize();
+
+    //Scrierea finala a imaginii
+    if(rank==MASTER)
+        writeData(outputFileName);
+
+
 
     return (EXIT_SUCCESS);
 }
