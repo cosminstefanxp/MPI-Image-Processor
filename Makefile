@@ -45,3 +45,4 @@ entropy_big: $(EXECUTABLE)
 	${MPIRUN} ${NP_ARG} 3 ./${EXECUTABLE} entropy picture.pgm 1 1 1 out_residual
 
 sources: @echo ${SOURCES}
+ 

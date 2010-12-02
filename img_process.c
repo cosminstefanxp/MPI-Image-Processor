@@ -323,13 +323,13 @@ void trimiteImageResidual()
                 printf("[MASTER] \tPrimim datele de la procesul %d.\n",i);
                 if(i==numberProcesses-1)
                     sendStripeSize = HEIGHT - sendStripeSize * (numberProcesses-1);
-                MPI_Irecv (fullImageResidual + i*initialStripSize*WIDTH*sizeof(short),sendStripeSize*WIDTH,MPI_SHORT,i,i,MPI_COMM_WORLD,&requests[pozCerere++]);
+                MPI_Irecv (fullImageResidual + i*initialStripSize*WIDTH,sendStripeSize*WIDTH,MPI_SHORT,i,i,MPI_COMM_WORLD,&requests[pozCerere++]);
             }
         //Punem si datele procesului MASTER in imageStrip
         for(i=0;i<stripSize;i++)
             for(j=0;j<WIDTH;j++)
             {
-                fullImageResidual[rank*WIDTH + i*WIDTH + i]=imageResidual[i][j];
+                fullImageResidual[rank*WIDTH + i*WIDTH + j]=imageResidual[i][j];
             }
 
         printf("[MASTER]\tAsteptam primirea datelor.\n");
@@ -340,7 +340,7 @@ void trimiteImageResidual()
 
 
 /* Realizeaza taskul 3 - calculul entropiei */
-void entropy(float a, float b, float c)
+double entropy(float a, float b, float c)
 {
     //Obtaining the extra-required lines from the neighbouring processes - MPI Communication
     MPI_Status status;
@@ -382,17 +382,66 @@ void entropy(float a, float b, float c)
     }
 
     /***** Calcul PREDICTOR + IMAGINE REZIDUALA ****/
+    /* Calcul simultan si al minimului si maximului pe fasie. Minimul si maximul vor fi folosite pentru numarare **/
+    short min=MAXSHORT;
+    short max=-MAXSHORT;
     for(i=1;i<=stripSize;i++)
 	for(j=1;j<=WIDTH;j++)
 	{
 	    //predictor
 	    imageResidual[i-1][j-1]=ceil(a*imageStrip[i-1][j] + b*imageStrip[i-1][j-1] + c*imageStrip[i][j-1]);
+	    //imagine residuala
 	    imageResidual[i-1][j-1]=imageStrip[i][j]-imageResidual[i-1][j-1];
+
+	    //maxim si minim
+	    if(imageResidual[i-1][j-1]>max)
+		max=imageResidual[i-1][j-1];
+	    if(imageResidual[i-1][j-1]<min)
+		min=imageResidual[i-1][j-1];
 	}
 
     printf("[Proces %d] \tS-a terminat calculul imaginii reziduale.\n",rank);
+/*
+    for(i=0;i<stripSize;i++,printf("\n"))
+	for(j=0;j<WIDTH;j++)
+	    printf("%4d ",imageResidual[i][j]);
+*/
+
+    //Comunicare imagine reziduala
     trimiteImageResidual();
 
+    //Comunicare minim si maxim global
+    short minTemp,maxTemp;
+    MPI_Reduce(&min,&minTemp,1,MPI_SHORT,MPI_MIN,MASTER,MPI_COMM_WORLD);
+    MPI_Reduce(&max,&maxTemp,1,MPI_SHORT,MPI_MAX,MASTER,MPI_COMM_WORLD);
+    min=minTemp; max=maxTemp;
+    
+    //Doar procesul master realizeaza caulculul entropiei
+    if(rank==MASTER)
+    {
+	printf("[Proces %d]\tMin absolut: %d, Max absolut: %d\n",rank,minTemp,maxTemp);
+
+	//Allocating space and counting the number of appearances for each symbol in the residualImage
+	unsigned* counter=(unsigned*)calloc(max-min+1,sizeof(unsigned));
+	for(i=0;i<HEIGHT*WIDTH;i++)
+	    counter[fullImageResidual[i]-min]++;
+
+	//Calculating the entropy
+	double entropy=0,probability=0;
+	for(i=0;i<max-min+1;i++)
+	{
+	    if(counter[i]==0)
+		continue;
+	    probability=(double)counter[i]/WIDTH/HEIGHT;
+	    entropy=entropy - probability*log2(probability);
+	    //printf("%d(%d -> %f) ",i+min,counter[i],probability,entropy);
+	}
+
+	return entropy;
+    }
+
+
+    return 0;
 }
 
 /*
@@ -604,9 +653,12 @@ int main(int argc, char** argv)
 	sscanf(argv[3],"%f",&a);
         sscanf(argv[4],"%f",&b);
 	sscanf(argv[5],"%f",&c);
-	entropy(a,b,c);
+	double entropie=entropy(a,b,c);
 	if(rank==MASTER)
+	{
 	    writeDataResidual(outputFileName);
+	    printf("\nValoarea entropiei pentru imaginea data: %f\n\n",entropie);
+	}
 
 	MPI_Finalize();
 	return (EXIT_SUCCESS);
