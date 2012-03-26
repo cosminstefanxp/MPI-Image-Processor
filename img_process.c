@@ -1,8 +1,10 @@
 /* 
- * File:   img_process.c
- * Author: cosmin
+ * Algoritmi paraleli si distribuiti
+ * Tema 3 -Procesare imagini
+ * 
+ * Author: Stefan-Dobrin Cosmin
+ * 331CA
  *
- * Created on November 26, 2010, 1:35 AM
  */
 #include <errno.h>
 #include <values.h>
@@ -121,10 +123,11 @@ void writeData(char* outputFile)
 
     //Scriere header
     fprintf(fout,"%s\n%d %d\n%d\n","P2",WIDTH,HEIGHT,MAX_COLOR);
+    fprintf(fout,"#Created by CosminSD\n");
     //Scriere date
-    for(i=0;i<HEIGHT;i++,fprintf(fout,"\n"))
+    for(i=0;i<HEIGHT;i++)
         for(j=0;j<WIDTH;j++)
-            fprintf(fout,"%d ",fullImage[i*WIDTH+j]);
+            fprintf(fout,"%d\n",fullImage[i*WIDTH+j]);
     fclose(fout);
 
     printf("[Proces %d]\tScriere fisier de iesire terminata.\n",rank);
@@ -217,16 +220,21 @@ void filters(char* filterName)
     {
         filterType=F_SHARPEN_C;
         filterMatrix=F_SHARPEN;
-    }
-    if(strcasecmp(filterName,"mean_removal")==0)
+    } else
+    if(strcasecmp(filterName,"mean_remove")==0)
     {
         filterType=F_MEAN_REMOVE_C;
         filterMatrix=F_MEAN_REMOVE;
-    }
+    } else
     if(strcasecmp(filterName,"emboss")==0)
     {
         filterType=F_EMBOSS_C;
         filterMatrix=F_EMBOSS;
+    } else
+    {
+	fprintf(stderr,"[ERROR] Mod incorect: %s. Se termina rularea.\n",filterName);
+	MPI_Abort(MPI_COMM_WORLD,1);
+	exit(1);
     }
 
     printf("[Proces %d] Setat mod filtru %s. Se incepe comunicarea pentru obtinerea infomatiilor necesare.\n",rank,filterName);
@@ -251,6 +259,23 @@ void filters(char* filterName)
 
     printf("[Proces %d] \tS-au primit datele auxiliare.\n",rank); // Fasia cu extensie este:\n\t",rank);
 
+    //Alocam spatiul pentru matricea de iesire
+    //Alocare spatiu cu verificare incadrare in memorie
+    /* Se va folosi matricea imageStripBackup, in care vom memora imaginea rezultata*/
+    U8** imageStripBackup=(U8**)malloc((stripSize+2)*sizeof(U8*));
+    if (imageStripBackup == NULL) {
+        fprintf(stderr,"[ERROR] Process %d could not allocate any more memory.\n", rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+    for(i=0;i<=stripSize+1;i++)
+    {
+        imageStripBackup[i]=(U8*)calloc((WIDTH + 2),sizeof(U8));
+        if (imageStripBackup[i] == NULL) {
+            fprintf(stderr,"[ERROR] Process %d could not allocate any more memory for strip row %d.\n", rank,i);
+            MPI_Abort(MPI_COMM_WORLD, 2);
+        }
+    }
+
     //Aplicam filtrul
     int sum,k;
     for(i=1;i<=stripSize;i++)
@@ -274,8 +299,16 @@ void filters(char* filterName)
 		sum=MAX_COLOR;
 	    if(sum<0)
 		sum=0;
-	    imageStrip[i][j]=sum;
+	    imageStripBackup[i][j]=sum;
 	}
+
+    //eliberam imageStrip
+    for(i=0;i<stripSize+2;i++)
+	free(imageStrip[i]);
+    free(imageStrip);
+
+    //Setam matricea imageStripBackup ca fiind imageStrip, pentru a fi scrisa in fisier
+    imageStrip=imageStripBackup;
     printf("[Proces %d] \tFiltrul a fost aplicat cu succes.\n",rank);
 
 
@@ -472,7 +505,7 @@ int main(int argc, char** argv)
     {
         if(argc!=5)
         {
-            fprintf (stderr,"\nNumar incorect de parametrii. Utilizare:\n%s filter input_file smooth/blur/sharpen/mean_removal/emboss output_file\n",argv[0]);
+            fprintf (stderr,"\nNumar incorect de parametrii. Utilizare:\n%s filter input_file smooth/blur/sharpen/mean_remove/emboss output_file\n",argv[0]);
             return EXIT_FAILURE;
         }
         outputFileName=argv[4];
@@ -654,6 +687,7 @@ int main(int argc, char** argv)
         sscanf(argv[4],"%f",&b);
 	sscanf(argv[5],"%f",&c);
 	double entropie=entropy(a,b,c);
+	MPI_Barrier(MPI_COMM_WORLD);
 	if(rank==MASTER)
 	{
 	    writeDataResidual(outputFileName);

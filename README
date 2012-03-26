@@ -1,0 +1,8 @@
+Stefan-Dobrin Cosmin
+
+The project consists of a image processing application that is using distributed processors (MPI). The development language is C/C++ with MPI extension and basically provides three operation types: contrast an image, add a filter (smooth, blur, sharpen, mean_removal, emboss) to an image and computing the entropy for an image.
+
+For execution in the command line, the parameters are as follow:
+	  -contrast: ./img_process contrast input_file min_value max_value output_file
+	  -filter:   ./img_process filter input_file smooth/blur/sharpen/mean_remove/emboss output_file
+	  -entropy:  ./img_process entropy input_file a b c output_file
